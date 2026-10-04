@@ -1,98 +1,337 @@
-"""EduPro - Instructor Performance and Course Quality Evaluation dashboard."""
-from pathlib import Path
+import streamlit as st
 import pandas as pd
 import plotly.express as px
-import streamlit as st
+from pathlib import Path
 
-st.set_page_config(page_title="EduPro Quality Analytics", page_icon="🎓", layout="wide")
-DATA_DIR = Path(__file__).parent / "data"
+# --------------------------------------------------
+# PAGE CONFIGURATION
+# --------------------------------------------------
+st.set_page_config(
+    page_title="Care Transition Efficiency Analytics",
+    page_icon="📊",
+    layout="wide"
+)
+
+# --------------------------------------------------
+# DATA LOADING
+# --------------------------------------------------
+BASE_DIR = Path(__file__).parent
+DATA_FILE = BASE_DIR / "HHS_Unaccompanied_Alien_Children_Program.csv"
+
 
 @st.cache_data
 def load_data():
-    teachers = pd.read_csv(DATA_DIR / "teachers.csv")
-    courses = pd.read_csv(DATA_DIR / "courses.csv")
-    transactions = pd.read_csv(DATA_DIR / "transactions.csv")
-    enrollment = transactions.groupby(["TeacherID", "CourseID"], as_index=False).size().rename(columns={"size": "Enrollments"})
-    detail = (enrollment.merge(teachers, on="TeacherID", how="left")
-                        .merge(courses, on="CourseID", how="left"))
-    return teachers, courses, transactions, detail
+    df = pd.read_csv(DATA_FILE)
 
-teachers, courses, transactions, detail = load_data()
+    # Remove completely empty rows
+    df = df.dropna(how="all").copy()
 
-st.title("EduPro | Instructor & Course Quality")
-st.caption("Interactive teaching-effectiveness analytics. The bundled CSV data is synthetic demo data; replace it with approved EduPro extracts for production use.")
+    # Convert Date column
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
 
-with st.sidebar:
-    st.header("Filters")
-    expertise = st.multiselect("Instructor expertise", sorted(detail.Expertise.unique()), default=sorted(detail.Expertise.unique()))
-    categories = st.multiselect("Course category", sorted(detail.CourseCategory.unique()), default=sorted(detail.CourseCategory.unique()))
-    levels = st.multiselect("Course level", sorted(detail.CourseLevel.unique()), default=sorted(detail.CourseLevel.unique()))
-    rating_range = st.slider("Teacher rating", 1.0, 5.0, (1.0, 5.0), 0.1)
-    min_enrollments = st.number_input("Minimum enrollments per course", min_value=0, value=0, step=5)
+    # Remove rows where date is unavailable
+    df = df.dropna(subset=["Date"]).copy()
 
-filtered = detail[
-    detail.Expertise.isin(expertise)
-    & detail.CourseCategory.isin(categories)
-    & detail.CourseLevel.isin(levels)
-    & detail.TeacherRating.between(*rating_range)
-    & (detail.Enrollments >= min_enrollments)
-].copy()
+    # Sort chronologically
+    df = df.sort_values("Date")
 
-if filtered.empty:
-    st.warning("No records match these filters. Expand a filter and try again.")
-    st.stop()
+    return df
 
-course_n = filtered.CourseID.nunique()
-teacher_n = filtered.TeacherID.nunique()
-avg_teacher = filtered.drop_duplicates("TeacherID").TeacherRating.mean()
-avg_course = filtered.CourseRating.mean()
 
-cols = st.columns(4)
-cols[0].metric("Average teacher rating", f"{avg_teacher:.2f} / 5")
-cols[1].metric("Average course rating", f"{avg_course:.2f} / 5")
-cols[2].metric("Active instructors", f"{teacher_n:,}")
-cols[3].metric("Course enrollments", f"{int(filtered.Enrollments.sum()):,}")
+df = load_data()
 
-st.divider()
-left, right = st.columns(2)
-with left:
-    st.subheader("Experience vs. teaching performance")
-    instructor_summary = (filtered.groupby(["TeacherID", "TeacherName", "Expertise", "YearsOfExperience", "TeacherRating"], as_index=False)
-                         .agg(AverageCourseRating=("CourseRating", "mean"), Enrollments=("Enrollments", "sum")))
-    fig = px.scatter(instructor_summary, x="YearsOfExperience", y="TeacherRating", color="Expertise",
-                     size="Enrollments", hover_name="TeacherName", trendline="ols",
-                     labels={"TeacherRating":"Teacher rating", "YearsOfExperience":"Years of experience"},
-                     color_discrete_sequence=px.colors.qualitative.Safe)
-    st.plotly_chart(fig, use_container_width=True)
-with right:
-    st.subheader("Course quality by category and level")
-    heat = filtered.pivot_table(index="CourseCategory", columns="CourseLevel", values="CourseRating", aggfunc="mean")
-    fig = px.imshow(heat, text_auto=".2f", color_continuous_scale="Tealgrn", aspect="auto",
-                    labels=dict(color="Average course rating", x="Course level", y="Course category"))
-    st.plotly_chart(fig, use_container_width=True)
+# --------------------------------------------------
+# TITLE
+# --------------------------------------------------
+st.title("Care Transition Efficiency & Placement Outcome Analytics")
 
-left, right = st.columns(2)
-with left:
-    st.subheader("Expertise-wise performance")
-    expertise_summary = (filtered.groupby("Expertise", as_index=False)
-                          .agg(AverageCourseRating=("CourseRating", "mean"), Courses=("CourseID", "nunique"))
-                          .sort_values("AverageCourseRating", ascending=True))
-    fig = px.bar(expertise_summary, x="AverageCourseRating", y="Expertise", orientation="h", text="Courses",
-                 range_x=[0, 5], color="AverageCourseRating", color_continuous_scale="Blues")
-    st.plotly_chart(fig, use_container_width=True)
-with right:
-    st.subheader("Instructor rating distribution")
-    fig = px.histogram(instructor_summary, x="TeacherRating", nbins=12, color_discrete_sequence=["#168aad"],
-                       labels={"TeacherRating":"Teacher rating"})
-    st.plotly_chart(fig, use_container_width=True)
+st.markdown(
+    """
+    **UAC Care Pipeline:**  
+    CBP Custody → HHS Care → Sponsor Placement
+    """
+)
 
-st.subheader("Instructor performance leaderboard")
-leaderboard = (instructor_summary.assign(
-    RatingConsistency=lambda x: 1 - (filtered.groupby("TeacherID").CourseRating.std().reindex(x.TeacherID).fillna(0).to_numpy() / 4),
-    RatingTier=lambda x: pd.cut(x.TeacherRating, bins=[0, 3.5, 4.2, 5], labels=["Low", "Mid", "High"], include_lowest=True)
-).sort_values(["TeacherRating", "AverageCourseRating", "Enrollments"], ascending=False))
-st.dataframe(leaderboard[["TeacherName", "Expertise", "YearsOfExperience", "TeacherRating", "AverageCourseRating", "RatingConsistency", "Enrollments", "RatingTier"]], hide_index=True, use_container_width=True,
-             column_config={"RatingConsistency": st.column_config.NumberColumn(format="%.2f"), "AverageCourseRating": st.column_config.NumberColumn(format="%.2f")})
+# --------------------------------------------------
+# SIDEBAR
+# --------------------------------------------------
+st.sidebar.header("Dashboard Filters")
 
-st.download_button("Download filtered instructor results", leaderboard.to_csv(index=False).encode("utf-8"), "edupro_instructor_results.csv", "text/csv")
-st.caption("Interpretation note: ratings are observational indicators. Review volume, category mix, learner feedback, and sample size before taking action.")
+min_date = df["Date"].min().date()
+max_date = df["Date"].max().date()
+
+date_range = st.sidebar.date_input(
+    "Select Date Range",
+    value=(min_date, max_date),
+    min_value=min_date,
+    max_value=max_date
+)
+
+if len(date_range) == 2:
+    start_date, end_date = date_range
+
+    filtered = df[
+        (df["Date"].dt.date >= start_date)
+        & (df["Date"].dt.date <= end_date)
+    ].copy()
+else:
+    filtered = df.copy()
+
+# --------------------------------------------------
+# COLUMN NAMES
+# --------------------------------------------------
+APPREHENDED = "Children apprehended and placed in CBP custody"
+CBP_CUSTODY = "Children in CBP custody"
+TRANSFERRED = "Children transferred out of CBP custody"
+HHS_CARE = "Children in HHS Care"
+DISCHARGED = "Children discharged from HHS Care"
+
+# --------------------------------------------------
+# KPI CALCULATIONS
+# --------------------------------------------------
+total_apprehended = filtered[APPREHENDED].sum()
+total_transferred = filtered[TRANSFERRED].sum()
+total_discharged = filtered[DISCHARGED].sum()
+
+avg_cbp = filtered[CBP_CUSTODY].mean()
+avg_hhs = filtered[HHS_CARE].mean()
+
+transfer_ratio = (
+    total_transferred / filtered[CBP_CUSTODY].sum() * 100
+    if filtered[CBP_CUSTODY].sum() != 0
+    else 0
+)
+
+discharge_ratio = (
+    total_discharged / filtered[HHS_CARE].sum() * 100
+    if filtered[HHS_CARE].sum() != 0
+    else 0
+)
+
+total_entries = total_apprehended + total_transferred
+total_exits = total_transferred + total_discharged
+
+throughput = (
+    total_exits / total_entries * 100
+    if total_entries != 0
+    else 0
+)
+
+# --------------------------------------------------
+# KPI CARDS
+# --------------------------------------------------
+st.subheader("Key Performance Indicators")
+
+col1, col2, col3, col4 = st.columns(4)
+
+with col1:
+    st.metric(
+        "Transfer Efficiency",
+        f"{transfer_ratio:.1f}%"
+    )
+
+with col2:
+    st.metric(
+        "Discharge Effectiveness",
+        f"{discharge_ratio:.1f}%"
+    )
+
+with col3:
+    st.metric(
+        "Pipeline Throughput",
+        f"{throughput:.1f}%"
+    )
+
+with col4:
+    st.metric(
+        "Average HHS Care Load",
+        f"{avg_hhs:,.0f}"
+    )
+
+# --------------------------------------------------
+# PIPELINE SUMMARY
+# --------------------------------------------------
+st.subheader("Care Pipeline Summary")
+
+pipeline_data = pd.DataFrame({
+    "Stage": [
+        "CBP Custody",
+        "Transferred to HHS",
+        "HHS Care",
+        "Discharged"
+    ],
+    "Volume": [
+        filtered[CBP_CUSTODY].sum(),
+        total_transferred,
+        filtered[HHS_CARE].sum(),
+        total_discharged
+    ]
+})
+
+fig_pipeline = px.bar(
+    pipeline_data,
+    x="Stage",
+    y="Volume",
+    text="Volume",
+    title="Care Pipeline Movement"
+)
+
+fig_pipeline.update_traces(texttemplate="%{text:,.0f}")
+
+st.plotly_chart(fig_pipeline, use_container_width=True)
+
+# --------------------------------------------------
+# DAILY FLOW TREND
+# --------------------------------------------------
+st.subheader("Daily Care Transition Trends")
+
+daily = filtered.copy()
+
+fig_flow = px.line(
+    daily,
+    x="Date",
+    y=[
+        APPREHENDED,
+        TRANSFERRED,
+        DISCHARGED
+    ],
+    title="Daily Inflow, Transfers and Discharges"
+)
+
+st.plotly_chart(fig_flow, use_container_width=True)
+
+# --------------------------------------------------
+# ACTIVE CARE LOAD
+# --------------------------------------------------
+st.subheader("Active Care Load")
+
+fig_load = px.line(
+    filtered,
+    x="Date",
+    y=[
+        CBP_CUSTODY,
+        HHS_CARE
+    ],
+    title="CBP and HHS Active Care Loads"
+)
+
+st.plotly_chart(fig_load, use_container_width=True)
+
+# --------------------------------------------------
+# BACKLOG ANALYSIS
+# --------------------------------------------------
+st.subheader("Backlog / Accumulation Analysis")
+
+backlog = filtered.copy()
+
+backlog["Total Active Care Load"] = (
+    backlog[CBP_CUSTODY] +
+    backlog[HHS_CARE]
+)
+
+fig_backlog = px.line(
+    backlog,
+    x="Date",
+    y="Total Active Care Load",
+    title="Combined Active Care Load"
+)
+
+st.plotly_chart(fig_backlog, use_container_width=True)
+
+# --------------------------------------------------
+# WEEKDAY VS WEEKEND
+# --------------------------------------------------
+st.subheader("Weekday vs Weekend Analysis")
+
+weekday_data = filtered.copy()
+
+weekday_data["Day Type"] = weekday_data["Date"].dt.dayofweek.map(
+    lambda x: "Weekend" if x >= 5 else "Weekday"
+)
+
+weekday_summary = (
+    weekday_data
+    .groupby("Day Type")[
+        [TRANSFERRED, DISCHARGED]
+    ]
+    .mean()
+    .reset_index()
+)
+
+fig_weekday = px.bar(
+    weekday_summary,
+    x="Day Type",
+    y=[TRANSFERRED, DISCHARGED],
+    barmode="group",
+    title="Average Transfers and Discharges"
+)
+
+st.plotly_chart(fig_weekday, use_container_width=True)
+
+# --------------------------------------------------
+# MONTHLY OUTCOME TREND
+# --------------------------------------------------
+st.subheader("Monthly Placement Trend")
+
+monthly = filtered.copy()
+
+monthly["Month"] = monthly["Date"].dt.to_period("M").astype(str)
+
+monthly_summary = (
+    monthly
+    .groupby("Month")[
+        [TRANSFERRED, DISCHARGED]
+    ]
+    .sum()
+    .reset_index()
+)
+
+fig_monthly = px.line(
+    monthly_summary,
+    x="Month",
+    y=[TRANSFERRED, DISCHARGED],
+    markers=True,
+    title="Monthly Transfers and Discharges"
+)
+
+st.plotly_chart(fig_monthly, use_container_width=True)
+
+# --------------------------------------------------
+# ALERTS
+# --------------------------------------------------
+st.subheader("System Alerts")
+
+recent = filtered.tail(7)
+
+recent_inflow = recent[APPREHENDED].sum()
+recent_discharge = recent[DISCHARGED].sum()
+
+if recent_inflow > recent_discharge:
+    st.warning(
+        "⚠️ Recent inflows are higher than successful discharges. "
+        "This may indicate increasing pressure on the care pipeline."
+    )
+else:
+    st.success(
+        "✅ Recent discharges are keeping pace with or exceeding "
+        "recent apprehension inflows."
+    )
+
+# --------------------------------------------------
+# DATA TABLE
+# --------------------------------------------------
+with st.expander("View Dataset"):
+    st.dataframe(
+        filtered,
+        use_container_width=True
+    )
+
+# --------------------------------------------------
+# FOOTER
+# --------------------------------------------------
+st.markdown("---")
+
+st.caption(
+    "Care Transition Efficiency & Placement Outcome Analytics | "
+    "Python + Pandas + Plotly + Streamlit"
+)
