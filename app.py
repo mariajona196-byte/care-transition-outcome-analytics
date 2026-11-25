@@ -80,6 +80,29 @@ else:
 # --------------------------------------------------
 # COLUMN NAMES
 # --------------------------------------------------
+# 1. Empty rows & extra spaces clean pannunga
+df = df.dropna(how="all")
+df.columns = df.columns.str.strip()
+
+# 2. Column names-a index moolama automatic-aa edukkalam (Spelling error varadhu)
+DATE_COL = df.columns[0]
+APPREHENDED = df.columns[1]
+CBP_CUSTODY = df.columns[2]
+TRANSFERRED = df.columns[3]
+HHS_CARE = df.columns[4]
+DISCHARGED = df.columns[5]
+
+# 3. Numbers-la irukkura comma (e.g. "2,484") eduthuttu integer-aa mathunga
+num_cols = [APPREHENDED, CBP_CUSTODY, TRANSFERRED, HHS_CARE, DISCHARGED]
+for col in num_cols:
+    filtered[col] = (
+        filtered[col]
+        .astype(str)
+        .str.replace(",", "", regex=False)
+        .str.strip()
+    )
+    filtered[col] = pd.to_numeric(filtered[col], errors="coerce").fillna(0)
+
 APPREHENDED = "Children apprehended and placed in CBP custody"
 CBP_CUSTODY = "Children in CBP custody"
 TRANSFERRED = "Children transferred out of CBP custody"
