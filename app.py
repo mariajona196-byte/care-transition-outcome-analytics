@@ -77,20 +77,17 @@ if len(date_range) == 2:
 else:
     filtered = df.copy()
 
-# --------------------------------------------------
-# COLUMN NAMES
-# --------------------------------------------------
-# 1. Empty rows & extra spaces clean pannunga
-df = df.dropna(how="all")
-df.columns = df.columns.str.strip()
+# 1. Filtered dataframe-la empty rows & spaces clean pannunga
+filtered = filtered.dropna(how="all")
+filtered.columns = filtered.columns.str.strip()
 
-# 2. Column names-a index moolama automatic-aa edukkalam (Spelling error varadhu)
-DATE_COL = df.columns[0]
-APPREHENDED = df.columns[1]
-CBP_CUSTODY = df.columns[2]
-TRANSFERRED = df.columns[3]
-HHS_CARE = df.columns[4]
-DISCHARGED = df.columns[5]
+# 2. Position (index) vechu exact column names edunga
+DATE_COL = filtered.columns[0]
+APPREHENDED = filtered.columns[1]
+CBP_CUSTODY = filtered.columns[2]
+TRANSFERRED = filtered.columns[3]
+HHS_CARE = filtered.columns[4]
+DISCHARGED = filtered.columns[5]
 
 # 3. Numbers-la irukkura comma (e.g. "2,484") eduthuttu integer-aa mathunga
 num_cols = [APPREHENDED, CBP_CUSTODY, TRANSFERRED, HHS_CARE, DISCHARGED]
@@ -103,18 +100,10 @@ for col in num_cols:
     )
     filtered[col] = pd.to_numeric(filtered[col], errors="coerce").fillna(0)
 
-APPREHENDED = "Children apprehended and placed in CBP custody"
-CBP_CUSTODY = "Children in CBP custody"
-TRANSFERRED = "Children transferred out of CBP custody"
-HHS_CARE = "Children in HHS Care"
-DISCHARGED = "Children discharged from HHS Care"
-
-# --------------------------------------------------
-# KPI CALCULATIONS
-# --------------------------------------------------
 total_apprehended = filtered[APPREHENDED].sum()
 total_transferred = filtered[TRANSFERRED].sum()
 total_discharged = filtered[DISCHARGED].sum()
+
 
 avg_cbp = filtered[CBP_CUSTODY].mean()
 avg_hhs = filtered[HHS_CARE].mean()
